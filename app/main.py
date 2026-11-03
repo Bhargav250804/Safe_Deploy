@@ -202,8 +202,11 @@ async def not_found_handler(request: Request, _exc: Exception) -> JSONResponse:
     tags=["Core"],
     summary="Root service greeting",
 )
-async def root() -> Dict[str, str]:
-  """Root endpoint returning basic service status and application version."""
+async def root(request: Request) -> Any:
+  """Root endpoint returning basic service status or serving dashboard for browser visits."""
+  accept = request.headers.get("accept", "")
+  if "text/html" in accept and not accept.startswith("*/*"):
+    return HTMLResponse(content=await dashboard_ui())
   return {
       "message": "Welcome to SafeDeploy",
       "status": "running",
