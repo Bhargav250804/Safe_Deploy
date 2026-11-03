@@ -52,7 +52,6 @@ export default function App() {
                   {data?.deployment_status || 'OPERATIONAL'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400">Automated CI/CD & Reliable Deployment Platform • Cloud-Native GitOps Delivery</p>
             </div>
           </div>
 
