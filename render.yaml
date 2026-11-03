@@ -1,0 +1,31 @@
+# =============================================================================
+# SafeDeploy - Render Blueprint Specification
+#
+# NOTE: Render free tier has limitations for Docker-based services.
+#       Image-based services may require manual configuration in the
+#       Render Dashboard rather than Blueprint auto-deploy.
+#
+# Docs: https://docs.render.com/blueprint-spec
+# =============================================================================
+
+services:
+  - type: web
+    name: safedeploy
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    numInstances: 1
+    envVars:
+      - key: PORT
+        value: "8000"
+      - key: APP_ENVIRONMENT
+        value: production
+      - key: GIT_SHA
+        generateValue: false
+      - key: APP_VERSION
+        value: "1.0.0"
+      - key: LOG_LEVEL
+        value: INFO

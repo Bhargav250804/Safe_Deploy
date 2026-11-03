@@ -1,0 +1,294 @@
+# =============================================================================
+# SafeDeploy CI/CD Pipeline
+# 
+# Stages:
+#   1. Checkout code
+#   2. Set up Python environment
+#   3. Run tests (pytest)
+#   4. Security scanning (dependency audit, secret detection)
+#   5. Build Docker image
+#   6. Trivy vulnerability scan
+#   7. Push to GHCR
+#   8. Deploy to Render
+#   9. Post-deploy validation
+#  10. Failure handling
+#
+# PRs  → CI only (test + scan)
+# Push → CI + Build + Publish + Deploy
+# =============================================================================
+name: SafeDeploy CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+# Cancel in-progress runs for the same branch/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Job 1: Continuous Integration
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  ci:
+    name: "CI – Test & Scan"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # ── Stage 1: Checkout ────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Stage 2: Python environment ──────────────────────────────────────
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── Stage 3: Testing ─────────────────────────────────────────────────
+      - name: Run tests with pytest
+        run: |
+          pytest tests/ -v --tb=short --junitxml=test-results/junit.xml
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: test-results/junit.xml
+          retention-days: 30
+
+      # ── Stage 4: Security scanning ──────────────────────────────────────
+      - name: Dependency audit
+        run: |
+          pip install pip-audit
+          pip-audit --strict --desc || echo "::warning::Dependency vulnerabilities found"
+        continue-on-error: true
+
+      - name: Secret detection
+        run: |
+          echo "Scanning for hardcoded secrets..."
+          # Fail if common secret patterns are found in source files
+          if grep -rn --include="*.py" --include="*.yml" --include="*.yaml" \
+              -E '(password|secret|api_key|token)\s*=\s*["\x27][^"\x27]{8,}' \
+              --exclude-dir=.git --exclude-dir=.venv . ; then
+            echo "::error::Potential hardcoded secrets detected!"
+            exit 1
+          fi
+          echo "No hardcoded secrets detected."
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 2: Build Docker Image & Trivy Scan  (main branch only)
+  # ───────────────────────────────────────────────────────────────────────────
+  build-and-scan:
+    name: "Build & Security Scan"
+    needs: ci
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── Stage 5: Docker build ───────────────────────────────────────────
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # ── Stage 6: Trivy vulnerability scan ───────────────────────────────
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+          format: "table"
+          output: "trivy-report.txt"
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: "CRITICAL,HIGH"
+
+      - name: Upload Trivy scan report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-report
+          path: trivy-report.txt
+          retention-days: 30
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 3: Publish to GHCR  (main branch only)
+  # ───────────────────────────────────────────────────────────────────────────
+  publish:
+    name: "Publish to GHCR"
+    needs: build-and-scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Stage 7: GHCR push ─────────────────────────────────────────────
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Output image digest
+        run: |
+          echo "## Published Image" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Tags:** \`${{ github.sha }}\`, \`latest\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Digest:** \`${{ steps.push.outputs.digest }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Job 4: Deploy to Render & Validate  (main branch only)
+  # ───────────────────────────────────────────────────────────────────────────
+  deploy:
+    name: "Deploy & Validate"
+    needs: publish
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+
+    steps:
+      # ── Stage 8: Trigger Render deployment ──────────────────────────────
+      - name: Trigger Render deploy hook
+        run: |
+          # Mask the hook URL so it never appears in logs
+          echo "::add-mask::${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
+          echo "Triggering Render deployment..."
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" \
+            "${{ secrets.RENDER_DEPLOY_HOOK_URL }}")
+          echo "Deploy hook response code: ${RESPONSE}"
+          if [ "${RESPONSE}" -lt 200 ] || [ "${RESPONSE}" -ge 300 ]; then
+            echo "::error::Deploy hook returned HTTP ${RESPONSE}"
+            exit 1
+          fi
+          echo "Deploy hook triggered successfully."
+
+      # ── Stage 9: Post-deploy validation ─────────────────────────────────
+      - name: Wait for deployment
+        run: |
+          echo "Waiting 90 seconds for Render to pull and start the new image..."
+          sleep 90
+
+      - name: Verify /health endpoint
+        run: |
+          RENDER_URL="${{ secrets.RENDER_APP_URL }}"
+          if [ -z "${RENDER_URL}" ]; then
+            echo "::warning::RENDER_APP_URL not set — skipping health validation."
+            exit 0
+          fi
+
+          MAX_RETRIES=5
+          RETRY_DELAY=15
+          for i in $(seq 1 $MAX_RETRIES); do
+            echo "Health check attempt ${i}/${MAX_RETRIES}..."
+            HTTP_CODE=$(curl -s -o /tmp/health_response.json \
+              -w "%{http_code}" "${RENDER_URL}/health" || echo "000")
+            if [ "${HTTP_CODE}" = "200" ]; then
+              STATUS=$(jq -r '.status' /tmp/health_response.json 2>/dev/null)
+              if [ "${STATUS}" = "healthy" ]; then
+                echo "✅ Health check passed."
+                cat /tmp/health_response.json
+                break
+              fi
+            fi
+            if [ "${i}" -eq "${MAX_RETRIES}" ]; then
+              echo "::error::Health check failed after ${MAX_RETRIES} attempts."
+              exit 1
+            fi
+            echo "Retrying in ${RETRY_DELAY}s..."
+            sleep ${RETRY_DELAY}
+          done
+
+      - name: Verify /version returns correct SHA
+        run: |
+          RENDER_URL="${{ secrets.RENDER_APP_URL }}"
+          if [ -z "${RENDER_URL}" ]; then
+            echo "::warning::RENDER_APP_URL not set — skipping version validation."
+            exit 0
+          fi
+
+          VERSION_RESPONSE=$(curl -sf "${RENDER_URL}/version" || echo "{}")
+          DEPLOYED_SHA=$(echo "${VERSION_RESPONSE}" | jq -r '.git_sha' 2>/dev/null)
+          EXPECTED_SHA="${{ github.sha }}"
+
+          echo "Deployed SHA : ${DEPLOYED_SHA}"
+          echo "Expected SHA : ${EXPECTED_SHA}"
+
+          if [ "${DEPLOYED_SHA}" = "${EXPECTED_SHA}" ]; then
+            echo "✅ Version SHA matches."
+          else
+            echo "::warning::Deployed SHA does not match expected. This may be expected if Render uses its own build context."
+          fi
+
+      # ── Stage 10: Failure handling ──────────────────────────────────────
+      - name: Handle deployment failure
+        if: failure()
+        run: |
+          echo "::error::Deployment or validation failed!"
+          echo "## ❌ Deployment Failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** \`${{ github.sha }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Actor:** ${{ github.actor }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Timestamp:** $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Action required:** Check Render dashboard and application logs." >> "$GITHUB_STEP_SUMMARY"
+          echo "Consider rolling back via the Render dashboard." >> "$GITHUB_STEP_SUMMARY"

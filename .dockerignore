@@ -1,0 +1,41 @@
+# Version control
+.git
+.github
+.gitignore
+
+# Python artifacts
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+dist
+build
+
+# Virtual environments
+.env
+.venv
+venv
+
+# Tests (not needed in production image)
+tests
+
+# Documentation
+docs
+*.md
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker overrides
+docker-compose.yml
+docker-compose.override.yml
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Scripts (not needed in production image)
+scripts
