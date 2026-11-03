@@ -1,7 +1,7 @@
 # 🚀 SafeDeploy — Automated CI/CD and Reliable Deployment System
 
-[![CI/CD Pipeline](https://github.com/USERNAME/safedeploy/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/USERNAME/safedeploy/actions)
-[![Docker](https://img.shields.io/badge/Docker-Containerized-blue)](https://ghcr.io/USERNAME/safedeploy)
+[![CI/CD Pipeline](https://github.com/Bhargav250804/Safe_Deploy/actions/workflows/ci-cd.yml/badge.svg)](https://github.com/Bhargav250804/Safe_Deploy/actions)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-blue)](https://ghcr.io/bhargav250804/safe_deploy)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-green)](https://python.org)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -274,7 +274,7 @@ Before setting up the project locally, ensure you have the following installed:
 ### Step 1: Clone the Repository
 
 ```bash
-git clone https://github.com/USERNAME/safedeploy.git
+git clone https://github.com/Bhargav250804/Safe_Deploy.git
 cd safedeploy
 ```
 
@@ -689,7 +689,7 @@ The CI/CD pipeline uses `GITHUB_TOKEN` which is automatically provided by GitHub
 For local testing, create a Personal Access Token (PAT):
 ```bash
 # Login to GHCR locally
-echo $GITHUB_PAT | docker login ghcr.io -u USERNAME --password-stdin
+echo $GITHUB_PAT | docker login ghcr.io -u Bhargav250804 --password-stdin
 ```
 
 #### 3. Package Visibility
@@ -731,7 +731,7 @@ See the detailed guide at [RENDER_SETUP_GUIDE.md](../03_EVIDENCE/deployment/REND
 1. Create account at [render.com](https://render.com)
 2. Create **New → Web Service**
 3. Select **Deploy an existing image from a registry**
-4. Enter image URL: `ghcr.io/USERNAME/safedeploy:latest`
+4. Enter image URL: `ghcr.io/bhargav250804/safe_deploy:latest`
 5. Select **Free** plan
 6. Set environment variable: `PORT=8000`
 7. Configure health check path: `/health`
@@ -839,13 +839,13 @@ If you know the SHA of a known-good deployment:
 
 ```bash
 # Trigger deployment of a specific known-good image
-# Update Render service to use: ghcr.io/USERNAME/safedeploy:<known-good-sha>
+# Update Render service to use: ghcr.io/bhargav250804/safe_deploy:<known-good-sha>
 
 # Or trigger deploy hook (which will pull :latest)
 # First, retag the known-good image as :latest
-docker pull ghcr.io/USERNAME/safedeploy:<known-good-sha>
-docker tag ghcr.io/USERNAME/safedeploy:<known-good-sha> ghcr.io/USERNAME/safedeploy:latest
-docker push ghcr.io/USERNAME/safedeploy:latest
+docker pull ghcr.io/bhargav250804/safe_deploy:<known-good-sha>
+docker tag ghcr.io/bhargav250804/safe_deploy:<known-good-sha> ghcr.io/bhargav250804/safe_deploy:latest
+docker push ghcr.io/bhargav250804/safe_deploy:latest
 
 # Then trigger deploy hook
 curl -X POST "$RENDER_DEPLOY_HOOK_URL"
@@ -956,7 +956,7 @@ denied: permission_denied: write_package
 **Solution**:
 ```bash
 # Check what vulnerabilities were found
-docker run --rm aquasec/trivy image ghcr.io/USERNAME/safedeploy:latest
+docker run --rm aquasec/trivy image ghcr.io/bhargav250804/safe_deploy:latest
 
 # Update base image
 # Change Dockerfile: FROM python:3.12-slim to latest available
